@@ -130,16 +130,8 @@ async fn wait_for_listener(
 }
 
 fn write_output(output: ProcessOutput) -> io::Result<()> {
-    match output {
-        ProcessOutput::Stdout(bytes) => {
-            io::stdout().write_all(&bytes)?;
-            io::stdout().flush()
-        }
-        ProcessOutput::Stderr(bytes) => {
-            io::stderr().write_all(&bytes)?;
-            io::stderr().flush()
-        }
-    }
+    io::stdout().write_all(&output.0)?;
+    io::stdout().flush()
 }
 
 fn exit_code(status: ExitStatus) -> i32 {

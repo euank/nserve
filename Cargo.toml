@@ -16,7 +16,7 @@ http-body-util = "0.1"
 hyper = { version = "1.7", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 ngrok = "0.19"
-nix = { version = "0.30", features = ["process", "ptrace", "signal"] }
+nix = { version = "0.30", features = ["process", "ptrace", "signal", "term"] }
 open = "5.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

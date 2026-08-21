@@ -1,8 +1,8 @@
 use std::{io::IsTerminal, sync::Arc};
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use nix::sys::signal::Signal;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::signal::unix::{signal, SignalKind};
 
 use crate::{process::ChildProcessControl, state::AppState};
 
@@ -31,8 +31,16 @@ pub async fn input_loop(child: Arc<ChildProcessControl>, state: AppState) -> std
     let mut input = tokio::io::stdin();
     let mut byte = [0_u8; 1];
     let mut escaped = false;
+    let mut resize = signal(SignalKind::window_change())?;
     loop {
-        if input.read(&mut byte).await? == 0 {
+        let count = tokio::select! {
+            count = input.read(&mut byte) => count?,
+            _ = resize.recv(), if terminal => {
+                child.resize();
+                continue;
+            }
+        };
+        if count == 0 {
             child.close_stdin();
             return Ok(());
         }
@@ -57,8 +65,6 @@ pub async fn input_loop(child: Arc<ChildProcessControl>, state: AppState) -> std
         }
         match byte[0] {
             0x0e => escaped = true,
-            0x03 => child.signal(Signal::SIGINT),
-            0x1a => child.signal(Signal::SIGTSTP),
             _ => child.write(&byte),
         }
     }
