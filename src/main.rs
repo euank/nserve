@@ -46,7 +46,7 @@ async fn run() -> Result<i32> {
     let mut forwarder = tokio::spawn(proxy::run(endpoint, upstream_rx, state.clone()));
 
     if cli.open {
-        if let Err(error) = open::that(&public_url) {
+        if let Err(error) = open::that_detached(&public_url) {
             eprintln!("[nserve] could not open browser: {error}");
         }
     }
