@@ -333,6 +333,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn output_channel_closes_after_delivering_a_large_final_write() {
+        let _guard = PROCESS_TEST_LOCK.lock().await;
+        let command = [
+            OsString::from("python3"),
+            OsString::from("-c"),
+            OsString::from("import os; os.write(1, b'x' * 262144 + b'FINAL')"),
+        ];
+        let mut child = ChildProcess::spawn(&command, false).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match child.events.recv().await {
+                    Some(ProcessEvent::Exited(status)) => {
+                        assert!(status.success());
+                        break;
+                    }
+                    Some(ProcessEvent::Error(error)) => panic!("child failed: {error}"),
+                    Some(ProcessEvent::Listening(_)) => {}
+                    None => panic!("child event channel closed before exit"),
+                }
+            }
+        })
+        .await
+        .expect("child exit timed out");
+
+        let mut output = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(chunk) = child.output.recv().await {
+                output.extend_from_slice(&chunk.0);
+            }
+        })
+        .await
+        .expect("child output did not close");
+
+        assert_eq!(output.len(), 262_149);
+        assert!(output.ends_with(b"FINAL"));
+    }
+
+    #[tokio::test]
     async fn dropping_a_running_child_terminates_and_reaps_it() {
         let _guard = PROCESS_TEST_LOCK.lock().await;
         let command = [
