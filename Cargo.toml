@@ -1,0 +1,28 @@
+[package]
+name = "nserve"
+version = "0.1.0"
+edition = "2021"
+description = "Run a local development server behind an embedded ngrok endpoint"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "1.0"
+bytes = "1.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.29"
+futures-util = "0.3"
+http-body-util = "0.1"
+hyper = { version = "1.7", features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+ngrok = "0.19"
+nix = { version = "0.30", features = ["process", "ptrace", "signal"] }
+open = "5.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml_ng = "0.10"
+tokio = { version = "1.47", features = ["full"] }
+url = "2.5"
+
+[dev-dependencies]
+tempfile = "3.21"

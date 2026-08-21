@@ -1,10 +1,10 @@
-## nserve
+# nserve
 
 nserve is a command line tool to easily create a public ngrok url (optionally
 with oauth) for any program which runs and then listens on some port or ports
-for http.
+for HTTP.
 
-nserve is meant to be a simpler way to run the combination of "ngrok + something" during local developlent.
+nserve is meant to be a simpler way to run the combination of "ngrok + something" during local development.
 
 nserve works best with programs like `rails serve`, `godoc -http=:6060`, and similar.
 
@@ -32,7 +32,7 @@ nserve --google-oauth ".*@something.com" -- [command] # require google login wit
 nserve --tcp -- [command] # use tcp
 ```
 
-These flags may all be combined arbitrarily.
+These flags may be combined where the selected protocol supports them.
 
 After running nserve, the first line output will be the ngrok url in use:
 
@@ -47,6 +47,78 @@ At any time in the future, you may use the nserve escape sequence, <ctrl+N>, to 
 |-------|---------|
 | `ctrl+n+n` | send `ctrl+n` to the underlying process |
 | `ctrl+n+?` | display help screen |
-| `ctrl+n+s | display nserve status page |
+| `ctrl+n+s` | display nserve status page |
 
 The status page displays the url, ngrok session status, and a log of requests + status codes.
+
+## Build and run
+
+nserve uses the ngrok Rust SDK directly. It does not install, invoke, or communicate
+with the ngrok command-line binary.
+
+```sh
+cargo build --release
+export NGROK_AUTHTOKEN=your-token
+target/release/nserve -- your-server-command
+```
+
+Authentication is resolved in this order:
+
+1. the `NGROK_AUTHTOKEN` environment variable; then
+2. `~/.config/ngrok/ngrok.yml`.
+
+Both the version 2 top-level `authtoken` field and the version 3
+`agent.authtoken` field are supported. A missing config file is ignored, while
+a present but unreadable or malformed file produces an error. nserve reads the
+file itself and still does not invoke the ngrok executable.
+
+Automatic port discovery currently requires Linux, procfs, and permission to trace
+a process that nserve starts. If ptrace is unavailable (for example, because of a
+container security policy), pass `--port`. Explicit-port mode does not use ptrace.
+
+Google OAuth is implemented as an ngrok Traffic Policy. The supplied pattern uses
+ngrok's RE2-compatible expression syntax. Since OAuth is an HTTP edge action,
+`--google-oauth` and `--tcp` cannot be combined.
+
+## Listener and request observation design
+
+Automatic discovery must not poll a process table and hope to notice a listener in
+time. nserve starts the command with `PTRACE_TRACEME`, which makes the kernel stop it
+immediately after `exec` and before the command can run application code. The
+supervisor then:
+
+1. enables syscall, fork, vfork, and clone tracing for the whole child process tree;
+2. identifies entry and successful exit of `listen(2)` with
+   `PTRACE_GET_SYSCALL_INFO`;
+3. resolves that exact file descriptor through `/proc/<pid>/fd` and
+   `/proc/<pid>/net/tcp{,6}`, including sockets initially bound to port zero; and
+4. selects the first successful listen event, then changes all tracees to normal
+   continuation so there is no continuing syscall-tracing overhead.
+
+This observes the listen request without rewriting it or injecting code into the
+wrapped program. Forked servers are covered, and there is no launch-to-first-poll
+race. `--port` intentionally bypasses this mechanism.
+
+Before starting the wrapped command, nserve creates an HTTP or TCP endpoint using
+`ngrok::Session`, prints its URL, and begins accepting connections. It deliberately
+uses the SDK listener API rather than `listen_and_forward`, so the endpoint does not
+need to know the eventual local port. `--open` is also handled before the child is
+started.
+
+Until the child listener is ready, HTTP requests receive a `503 Service Unavailable`
+page with a waiting spinner, `Retry-After: 1`, and automatic one-second browser
+reloads. The response is marked `no-store`. Pending TCP connections wait for the
+local port to become ready. Once discovery publishes the port, new HTTP requests and
+held TCP connections are forwarded to the child.
+
+HTTP connections are served by Hyper and reverse-proxied to the local program,
+allowing nserve to record method, URI, upstream response status, and elapsed time.
+Protocol upgrades such as WebSockets are bridged after the 101 response. TCP mode
+copies the byte stream without attempting HTTP inspection. The local status log
+contains the most recent 100 HTTP requests that reached the proxy, including waiting
+responses; requests rejected at ngrok's OAuth edge are visible in ngrok's traffic
+observability, not in the local upstream log.
+
+Because the command is launched only after the endpoint URL is printed, no child
+output buffering is needed to satisfy the first-line guarantee. Its stdout and stderr
+are drained and relayed as soon as it starts.
