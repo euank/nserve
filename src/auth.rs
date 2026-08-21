@@ -10,8 +10,6 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct NgrokConfig {
-    #[allow(dead_code)]
-    version: Option<u8>,
     authtoken: Option<String>,
     agent: Option<AgentConfig>,
 }
@@ -83,6 +81,14 @@ mod tests {
     fn reads_v2_top_level_token() {
         assert_eq!(
             parse_config("version: 2\nauthtoken: v2-token\n").unwrap(),
+            Some("v2-token".into())
+        );
+    }
+
+    #[test]
+    fn accepts_a_quoted_config_version() {
+        assert_eq!(
+            parse_config("version: \"2\"\nauthtoken: v2-token\n").unwrap(),
             Some("v2-token".into())
         );
     }
