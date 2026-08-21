@@ -3,8 +3,12 @@ use std::{
     io::{self, Read, Write},
     os::unix::process::CommandExt,
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -21,6 +25,7 @@ pub struct ChildProcess {
     pub stdin: Arc<Mutex<Option<ChildStdin>>>,
     pub output: UnboundedReceiver<ProcessOutput>,
     pub events: UnboundedReceiver<ProcessEvent>,
+    exited: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -41,12 +46,14 @@ impl ChildProcess {
         }
 
         let (events_tx, events) = mpsc::unbounded_channel();
+        let exited = Arc::new(AtomicBool::new(false));
         let command = command.to_vec();
         let (mut child, pid, child_stdin, child_stdout, child_stderr) = if trace_listeners {
             // Linux associates ptrace supervision with a particular thread. Keep
             // spawn, waitpid, and all ptrace requests on this dedicated thread.
             let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
             let trace_events = events_tx.clone();
+            let trace_exited = exited.clone();
             thread::Builder::new()
                 .name("nserve-listen-tracer".into())
                 .spawn(move || match spawn_command(&command, true) {
@@ -54,7 +61,7 @@ impl ChildProcess {
                         let pid = child.id();
                         let parts = take_parts(&mut child);
                         if started_tx.send(Ok((pid, parts))).is_ok() {
-                            discovery::trace(pid, trace_events);
+                            discovery::trace(pid, trace_events, trace_exited);
                         }
                     }
                     Err(error) => {
@@ -79,10 +86,12 @@ impl ChildProcess {
 
         if let Some(mut child) = child.take() {
             let events_tx = events_tx;
+            let wait_exited = exited.clone();
             thread::Builder::new()
                 .name("nserve-child-wait".into())
                 .spawn(move || match child.wait() {
                     Ok(status) => {
+                        wait_exited.store(true, Ordering::Release);
                         let _ = events_tx.send(ProcessEvent::Exited(status));
                     }
                     Err(error) => {
@@ -96,6 +105,7 @@ impl ChildProcess {
             stdin,
             output,
             events,
+            exited,
         })
     }
 
@@ -109,6 +119,34 @@ impl ChildProcess {
             stdin: self.stdin.clone(),
         })
     }
+}
+
+impl Drop for ChildProcess {
+    fn drop(&mut self) {
+        if self.exited.load(Ordering::Acquire) {
+            return;
+        }
+
+        self.signal(Signal::SIGTERM);
+        if wait_for_exit(&self.exited, Duration::from_secs(1)) {
+            return;
+        }
+
+        self.signal(Signal::SIGKILL);
+        let _ = wait_for_exit(&self.exited, Duration::from_secs(1));
+    }
+}
+
+fn wait_for_exit(exited: &AtomicBool, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !exited.load(Ordering::Acquire) {
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        thread::park_timeout((deadline - now).min(Duration::from_millis(10)));
+    }
+    true
 }
 
 fn spawn_command(command: &[OsString], trace_listeners: bool) -> Result<Child> {
@@ -236,5 +274,23 @@ mod tests {
 
         assert_eq!(observed, announced);
         child.signal(Signal::SIGTERM);
+    }
+
+    #[test]
+    fn dropping_a_running_child_terminates_and_reaps_it() {
+        let command = [
+            OsString::from("python3"),
+            OsString::from("-c"),
+            OsString::from("import time; time.sleep(30)"),
+        ];
+        let child = ChildProcess::spawn(&command, false).unwrap();
+        let pid = Pid::from_raw(child.pid as i32);
+
+        drop(child);
+
+        assert_eq!(
+            nix::sys::signal::kill(pid, None),
+            Err(nix::errno::Errno::ESRCH)
+        );
     }
 }

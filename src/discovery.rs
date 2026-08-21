@@ -5,6 +5,10 @@ use std::{
     fs, io,
     path::Path,
     process::ExitStatus,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use nix::{
@@ -24,15 +28,19 @@ pub enum ProcessEvent {
     Error(String),
 }
 
-pub fn trace(root: u32, events: UnboundedSender<ProcessEvent>) {
+pub fn trace(root: u32, events: UnboundedSender<ProcessEvent>, exited: Arc<AtomicBool>) {
     let root = Pid::from_raw(root as i32);
-    let result = trace_inner(root, &events);
+    let result = trace_inner(root, &events, &exited);
     if let Err(error) = result {
         let _ = events.send(ProcessEvent::Error(error.to_string()));
     }
 }
 
-fn trace_inner(root: Pid, events: &UnboundedSender<ProcessEvent>) -> anyhow::Result<()> {
+fn trace_inner(
+    root: Pid,
+    events: &UnboundedSender<ProcessEvent>,
+    exited: &AtomicBool,
+) -> anyhow::Result<()> {
     let initial = waitpid(root, None)?;
     if !matches!(initial, WaitStatus::Stopped(_, Signal::SIGTRAP)) {
         anyhow::bail!("child did not enter its expected pre-exec trace stop: {initial:?}");
@@ -86,6 +94,7 @@ fn trace_inner(root: Pid, events: &UnboundedSender<ProcessEvent>) -> anyhow::Res
             WaitStatus::Exited(pid, code) => {
                 tracees.remove(&pid);
                 if pid == root {
+                    exited.store(true, Ordering::Release);
                     let _ = events.send(ProcessEvent::Exited(ExitStatus::from_raw(code << 8)));
                     return Ok(());
                 }
@@ -94,6 +103,7 @@ fn trace_inner(root: Pid, events: &UnboundedSender<ProcessEvent>) -> anyhow::Res
                 tracees.remove(&pid);
                 if pid == root {
                     let raw = signal as i32 | if core_dumped { 0x80 } else { 0 };
+                    exited.store(true, Ordering::Release);
                     let _ = events.send(ProcessEvent::Exited(ExitStatus::from_raw(raw)));
                     return Ok(());
                 }
