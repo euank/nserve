@@ -51,6 +51,24 @@ At any time in the future, you may use the nserve escape sequence, <ctrl+N>, to 
 
 The status page displays the url, ngrok session status, and a log of requests + status codes.
 
+## Install with Nix
+
+Install `nserve` directly from GitHub:
+
+```sh
+nix profile add github:euank/nserve
+nserve -- your-server-command
+```
+
+Or run it without installing:
+
+```sh
+nix run github:euank/nserve -- -- your-server-command
+```
+
+For development, `nix develop` provides Cargo, Rust, Clippy, and rustfmt. The
+flake supports x86_64 and aarch64 Linux.
+
 ## Build and run
 
 nserve uses the ngrok Rust SDK directly. It does not install, invoke, or communicate
