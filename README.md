@@ -86,9 +86,7 @@ Authentication is resolved in this order:
 2. `~/.config/ngrok/ngrok.yml`.
 
 Both the version 2 top-level `authtoken` field and the version 3
-`agent.authtoken` field are supported. A missing config file is ignored, while
-a present but unreadable or malformed file produces an error. nserve reads the
-file itself and still does not invoke the ngrok executable.
+`agent.authtoken` field are supported.
 
 Automatic port discovery currently requires Linux, procfs, and permission to trace
 a process that nserve starts. If ptrace is unavailable (for example, because of a
