@@ -56,14 +56,14 @@ The status page displays the url, ngrok session status, and a log of requests + 
 Install `nserve` directly from GitHub:
 
 ```sh
-nix profile add github:euank/nserve
+nix profile add github:euank/nserve/main
 nserve -- your-server-command
 ```
 
 Or run it without installing:
 
 ```sh
-nix run github:euank/nserve -- -- your-server-command
+nix run github:euank/nserve/main -- -- your-server-command
 ```
 
 For development, `nix develop` provides Cargo, Rust, Clippy, and rustfmt. The
