@@ -20,6 +20,7 @@ pub struct RequestRecord {
 #[derive(Debug)]
 struct Inner {
     url: String,
+    local_scheme: &'static str,
     local_port: Option<u16>,
     session: String,
     requests: VecDeque<RequestRecord>,
@@ -29,9 +30,10 @@ struct Inner {
 pub struct AppState(Arc<Mutex<Inner>>);
 
 impl AppState {
-    pub fn new(url: String) -> Self {
+    pub fn new(url: String, local_scheme: &'static str) -> Self {
         Self(Arc::new(Mutex::new(Inner {
             url,
+            local_scheme,
             local_port: None,
             session: "connected".into(),
             requests: VecDeque::new(),
@@ -58,7 +60,7 @@ impl AppState {
         let inner = self.0.lock().expect("status mutex poisoned");
         let local = inner.local_port.map_or_else(
             || "waiting for child listener".to_owned(),
-            |port| format!("http://localhost:{port}"),
+            |port| format!("{}://localhost:{port}", inner.local_scheme),
         );
         let mut output = format!(
             "\r\n[nserve] status\r\n  URL: {}\r\n  Local: {}\r\n  Session: {}\r\n  Recent requests:\r\n",
@@ -79,5 +81,21 @@ impl AppState {
             }
         }
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_the_local_protocol() {
+        let tcp = AppState::new("tcp://example.ngrok.app:1234".into(), "tcp");
+        tcp.set_local_port(4321);
+        assert!(tcp.render().contains("Local: tcp://localhost:4321"));
+
+        let http = AppState::new("https://example.ngrok.app".into(), "http");
+        http.set_local_port(8080);
+        assert!(http.render().contains("Local: http://localhost:8080"));
     }
 }

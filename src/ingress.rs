@@ -5,7 +5,7 @@ use ngrok::{
     tunnel::{HttpTunnel, TcpTunnel},
 };
 use serde_json::json;
-use url::Url;
+use url::{Host, Url};
 
 use crate::{auth, cli::Cli};
 
@@ -83,6 +83,12 @@ fn parse_http_url(value: &str) -> Result<(String, Scheme)> {
     if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
         bail!("--url may not contain a path, query, or fragment");
     }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        bail!("--url may not contain user information");
+    }
+    if parsed.port().is_some() {
+        bail!("HTTP --url may not contain a port");
+    }
     let domain = parsed
         .host_str()
         .context("--url is missing a domain")?
@@ -91,11 +97,33 @@ fn parse_http_url(value: &str) -> Result<(String, Scheme)> {
 }
 
 fn parse_tcp_address(value: &str) -> Result<String> {
-    let address = value.strip_prefix("tcp://").unwrap_or(value);
-    if address.is_empty() || !address.contains(':') {
-        bail!("TCP --url must look like tcp://host:port");
+    let normalized = if value.contains("://") {
+        value.to_owned()
+    } else {
+        format!("tcp://{value}")
+    };
+    let parsed = Url::parse(&normalized).context("TCP --url must look like tcp://host:port")?;
+    if parsed.scheme() != "tcp" {
+        bail!("TCP mode requires a tcp:// --url");
     }
-    Ok(address.to_owned())
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || !matches!(parsed.path(), "" | "/")
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        bail!("TCP --url may only contain a host and port");
+    }
+    let host = match parsed.host().context("TCP --url is missing a host")? {
+        Host::Domain(host) => host.to_owned(),
+        Host::Ipv4(host) => host.to_string(),
+        Host::Ipv6(host) => format!("[{host}]"),
+    };
+    let port = parsed.port().context("TCP --url is missing a port")?;
+    if port == 0 {
+        bail!("TCP --url port must be greater than zero");
+    }
+    Ok(format!("{host}:{port}"))
 }
 
 fn google_oauth_policy(pattern: &str) -> Result<String> {
@@ -130,6 +158,25 @@ mod tests {
         let (domain, scheme) = parse_http_url("http://demo.ngrok.app").unwrap();
         assert_eq!(domain, "demo.ngrok.app");
         assert!(matches!(scheme, Scheme::HTTP));
+    }
+
+    #[test]
+    fn rejects_unsupported_http_url_components() {
+        assert!(parse_http_url("https://demo.ngrok.app:8443").is_err());
+        assert!(parse_http_url("https://user@demo.ngrok.app").is_err());
+    }
+
+    #[test]
+    fn parses_and_validates_requested_tcp_address() {
+        assert_eq!(
+            parse_tcp_address("tcp://demo.ngrok.app:1234").unwrap(),
+            "demo.ngrok.app:1234"
+        );
+        assert_eq!(parse_tcp_address("[::1]:1234").unwrap(), "[::1]:1234");
+        assert!(parse_tcp_address("demo.ngrok.app").is_err());
+        assert!(parse_tcp_address("demo.ngrok.app:0").is_err());
+        assert!(parse_tcp_address("https://demo.ngrok.app:1234").is_err());
+        assert!(parse_tcp_address("tcp://demo.ngrok.app:1234/path").is_err());
     }
 
     #[test]

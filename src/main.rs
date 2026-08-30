@@ -44,7 +44,8 @@ async fn run() -> Result<i32> {
     println!("[nserve] Created ngrok session with URL {public_url}");
     io::stdout().flush()?;
 
-    let state = state::AppState::new(public_url.clone());
+    let local_scheme = if cli.tcp { "tcp" } else { "http" };
+    let state = state::AppState::new(public_url.clone(), local_scheme);
     let (upstream_tx, upstream_rx) = watch::channel(None);
     let mut forwarder = tokio::spawn(proxy::run(endpoint, upstream_rx, state.clone()));
 
