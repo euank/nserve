@@ -2,8 +2,12 @@
 name = "nserve"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 description = "Run a local development server behind an embedded ngrok endpoint"
 license = "MIT OR Apache-2.0"
+homepage = "https://github.com/euank/nserve"
+repository = "https://github.com/euank/nserve"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0"

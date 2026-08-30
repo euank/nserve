@@ -72,7 +72,7 @@ flake supports x86_64 and aarch64 Linux.
 ## Build and run
 
 nserve uses the ngrok Rust SDK directly. It does not install, invoke, or communicate
-with the ngrok command-line binary.
+with the ngrok command-line binary. Building requires Rust 1.88 or newer.
 
 ```sh
 cargo build --release
